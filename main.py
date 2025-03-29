@@ -1,13 +1,15 @@
 import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
 import networkx as nx
-
+import time
+import math
+import random
 
 class GraphApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Задача коммивояжера")
-        self.root.geometry("1400x800")  # Увеличили размер окна
+        self.root.title("Задача коммивояжера (NN + RNN)")
+        self.root.geometry("1400x800")
 
         self.main_frame = tk.Frame(root)
         self.main_frame.pack(padx=20, pady=20)
@@ -15,14 +17,12 @@ class GraphApp:
         self.graph_frame = tk.Frame(self.main_frame)
         self.graph_frame.grid(row=0, column=0, padx=20)
 
-        # Увеличили размеры канвасов
         self.canvas = tk.Canvas(self.graph_frame, width=700, height=400, bg="white")
         self.canvas.grid(row=0, column=0)
 
         self.result_canvas = tk.Canvas(self.graph_frame, width=700, height=400, bg="white")
         self.result_canvas.grid(row=0, column=1, padx=20)
 
-        # Таблица для отображения рёбер с прокруткой
         self.table_frame = tk.Frame(self.main_frame)
         self.table_frame.grid(row=1, column=0, columnspan=2, pady=10)
 
@@ -32,12 +32,10 @@ class GraphApp:
         self.tree.heading("Weight", text="Вес")
         self.tree.pack(side="left", fill="both", expand=True)
 
-        # Добавляем вертикальную прокрутку
         scroll_y = ttk.Scrollbar(self.table_frame, orient="vertical", command=self.tree.yview)
         scroll_y.pack(side="right", fill="y")
         self.tree.configure(yscrollcommand=scroll_y.set)
 
-        # Добавляем горизонтальную прокрутку
         scroll_x = ttk.Scrollbar(self.table_frame, orient="horizontal", command=self.tree.xview)
         scroll_x.pack(side="bottom", fill="x")
         self.tree.configure(xscrollcommand=scroll_x.set)
@@ -45,26 +43,28 @@ class GraphApp:
         self.control_frame = tk.Frame(root)
         self.control_frame.pack(pady=10)
 
-        self.calc_button = tk.Button(self.control_frame, text="Найти оптимальный путь", command=self.main_procces)
+        self.calc_button = tk.Button(self.control_frame, text="Найти оптимальный путь (NN)", command=self.run_nn)
         self.calc_button.grid(row=0, column=0, padx=5)
 
+        self.rnn_button = tk.Button(self.control_frame, text="Запустить RNN (все вершины)", command=self.run_rnn)
+        self.rnn_button.grid(row=0, column=1, padx=5)
+
         self.clear_button = tk.Button(self.control_frame, text="Очистить граф", command=self.clear_graph)
-        self.clear_button.grid(row=0, column=1, padx=5)
+        self.clear_button.grid(row=0, column=2, padx=5)
 
         self.cencelator_button = tk.Button(self.control_frame, text="Отменить", command=self.cencelator)
-        self.cencelator_button.grid(row=0, column=2, padx=5)
-
-        self.use_2opt = tk.BooleanVar()
-        self.opt_checkbox = tk.Checkbutton(self.control_frame, text="Использовать 2-opt", variable=self.use_2opt)
-        self.opt_checkbox.grid(row=0, column=3, padx=5)
+        self.cencelator_button.grid(row=0, column=3, padx=5)
 
         self.output_label = tk.Label(self.control_frame, text="Общая длина: ")
         self.output_label.grid(row=1, column=0, columnspan=4)
 
+        self.time_label = tk.Label(self.control_frame, text="Время выполнения: ")
+        self.time_label.grid(row=2, column=0, columnspan=4)
+
         self.graph = nx.DiGraph()
         self.nodes = []
         self.selected_node = None
-        self.history = []  # Стек для хранения истории действий
+        self.history = []
 
         self.canvas.bind("<Button-1>", self.handle_click)
 
@@ -79,7 +79,7 @@ class GraphApp:
         node_id = len(self.nodes)
         self.nodes.append((event.x, event.y))
         self.graph.add_node(node_id, pos=(event.x, event.y))
-        self.history.append(("add_node", node_id))  # Сохраняем действие в историю
+        self.history.append(("add_node", node_id))
         self.draw_graph()
 
     def add_edge(self, node):
@@ -94,18 +94,17 @@ class GraphApp:
                 if weight is not None:
                     if not self.graph.has_edge(first_node, second_node):
                         self.graph.add_edge(first_node, second_node, weight=weight)
-                        self.history.append(("add_edge", (first_node, second_node, weight)))  # Сохраняем действие
-                        self.update_table(first_node, second_node, weight)  # Обновляем таблицу
+                        self.history.append(("add_edge", (first_node, second_node, weight)))
+                        self.update_table(first_node, second_node, weight)
                     else:
                         old_weight = self.graph[first_node][second_node]['weight']
                         self.graph[first_node][second_node]['weight'] = weight
-                        self.history.append(("update_edge", (first_node, second_node, old_weight)))  # Сохраняем действие
-                        self.update_table(first_node, second_node, weight)  # Обновляем таблицу
+                        self.history.append(("update_edge", (first_node, second_node, old_weight)))
+                        self.update_table(first_node, second_node, weight)
                     self.selected_node = None
                     self.draw_graph()
 
     def update_table(self, from_node, to_node, weight):
-        """Обновляет таблицу, добавляя новое ребро."""
         self.tree.insert("", "end", values=(from_node, to_node, weight))
 
     def draw_graph(self):
@@ -152,7 +151,7 @@ class GraphApp:
             messagebox.showinfo("Информация", "Нет действий для отмены")
             return
 
-        last_action = self.history.pop()  # Извлекаем последнее действие
+        last_action = self.history.pop()
         action_type, data = last_action
 
         if action_type == "add_node":
@@ -162,11 +161,11 @@ class GraphApp:
         elif action_type == "add_edge":
             first_node, second_node, weight = data
             self.graph.remove_edge(first_node, second_node)
-            self.remove_from_table(first_node, second_node)  # Удаляем ребро из таблицы
+            self.remove_from_table(first_node, second_node)
         elif action_type == "update_edge":
             first_node, second_node, old_weight = data
             self.graph[first_node][second_node]['weight'] = old_weight
-            self.update_table(first_node, second_node, old_weight)  # Обновляем таблицу
+            self.update_table(first_node, second_node, old_weight)
 
         self.draw_graph()
 
@@ -178,44 +177,9 @@ class GraphApp:
                 self.tree.delete(item)
                 break
 
-    def main_procces(self):
-        if len(self.graph.nodes) < 2:
-            messagebox.showerror("Ошибка", "Граф должен содержать хотя бы 2 вершины")
-            return
-
-        # Переменные для хранения лучшего пути и его длины
-        best_path = None
-        best_distance = float('inf')
-
-        # Перебор всех вершин в качестве начальной
-        for start_node in self.graph.nodes:
-            path = self.nearest_neighbor(start_node)
-            if path is None:
-                continue  # Пропускаем, если путь невозможен
-
-            # Вычисляем длину пути
-            distance = self.calculate_path_distance(path)
-            if distance < best_distance:
-                best_path = path
-                best_distance = distance
-
-        # Если ни один путь не был найден
-        if best_path is None:
-            messagebox.showinfo("Информация", "Путей нет")
-            return
-
-        # Применение 2-opt, если выбрано
-        if self.use_2opt.get():
-            best_path = self.two_opt(best_path)
-            best_distance = self.calculate_path_distance(best_path)
-
-        # Вывод результата
-        self.output_label.config(text=f"Общая длина: {best_distance}")
-        self.draw_result(best_path)
-
     def nearest_neighbor(self, start_node):
-        """Метод ближайшего соседа с заданной начальной вершиной."""
-        path = [start_node]  # Начинаем с заданной вершины
+        """Классический алгоритм ближайшего соседа."""
+        path = [start_node]
         unvisited = set(self.graph.nodes) - {start_node}
 
         while unvisited:
@@ -223,144 +187,149 @@ class GraphApp:
             nearest_node = None
             min_weight = float('inf')
 
-            # Ищем ближайшую вершину
             for node in unvisited:
-                edge_data = self.graph.get_edge_data(last_node, node)
-                if edge_data is not None and edge_data['weight'] < min_weight:
-                    nearest_node = node
-                    min_weight = edge_data['weight']
+                if self.graph.has_edge(last_node, node):
+                    weight = self.graph[last_node][node]['weight']
+                    if weight < min_weight:
+                        nearest_node = node
+                        min_weight = weight
 
-            # Если ближайшая вершина не найдена, путь невозможен
             if nearest_node is None:
                 return None
 
             path.append(nearest_node)
             unvisited.remove(nearest_node)
 
-        # Проверяем, можно ли замкнуть цикл
         if not self.graph.has_edge(path[-1], path[0]):
             return None
 
         return path
 
+    def run_nn(self):
+        """Запуск NN со случайной начальной вершиной."""
+        if len(self.graph.nodes) < 2:
+            messagebox.showerror("Ошибка", "Граф должен содержать хотя бы 2 вершины")
+            return
+
+        start_time = time.perf_counter()
+        start_node = random.choice(list(self.graph.nodes))  # Можно выбрать любую вершину
+        path = self.nearest_neighbor(start_node)
+
+        if path:
+            distance = self.calculate_path_distance(path)
+            elapsed = time.perf_counter() - start_time
+            self.output_label.config(text=f"Общая длина (NN): {distance}")
+            self.time_label.config(text=f"Время выполнения: {elapsed:.4f} сек")
+            self.draw_result(path)
+        else:
+            messagebox.showinfo("Информация", "Путь не найден")
+
+    def run_rnn(self):
+        """Repetitive Nearest Neighbor: запуск NN для всех вершин."""
+        if len(self.graph.nodes) < 2:
+            messagebox.showerror("Ошибка", "Граф должен содержать хотя бы 2 вершины")
+            return
+
+        start_time = time.perf_counter()
+        best_path = None
+        best_distance = float('inf')
+
+        for start_node in self.graph.nodes:
+            path = self.nearest_neighbor(start_node)
+            if path:
+                distance = self.calculate_path_distance(path)
+                if distance < best_distance:
+                    best_path = path
+                    best_distance = distance
+
+        if best_path:
+            elapsed = time.perf_counter() - start_time
+            self.output_label.config(text=f"Общая длина (RNN): {best_distance}")
+            self.time_label.config(text=f"Время выполнения: {elapsed:.4f} сек")
+            self.draw_result(best_path)
+        else:
+            messagebox.showinfo("Информация", "Путей нет")
+
     def calculate_path_distance(self, path):
-        """Вычисление общей длины пути."""
+        """Вычисляет длину гамильтонова цикла."""
         distance = 0
         for i in range(len(path) - 1):
             edge_data = self.graph.get_edge_data(path[i], path[i + 1])
             if edge_data is None:
-                return float('inf')  # Если ребра нет, путь невозможен
+                return float('inf')
             distance += edge_data['weight']
-        # Замыкание цикла
         edge_data = self.graph.get_edge_data(path[-1], path[0])
         if edge_data is None:
-            return float('inf')  # Если ребра нет, путь невозможен
+            return float('inf')
         distance += edge_data['weight']
         return distance
 
-    def two_opt(self, path):
-        """Модификация 2-opt для улучшения маршрута."""
-        best_path = path
-        best_distance = self.calculate_path_distance(path)
-        improved = True
-
-        while improved:
-            improved = False
-            for i in range(1, len(path) - 2):
-                for j in range(i + 1, len(path)):
-                    if j - i == 1:
-                        continue  # Пропускаем соседние рёбра
-                    new_path = path[:i] + path[i:j][::-1] + path[j:]
-                    new_distance = self.calculate_path_distance(new_path)
-                    if new_distance < best_distance:
-                        best_path = new_path
-                        best_distance = new_distance
-                        improved = True
-            path = best_path
-
-        return best_path
-
     def draw_result(self, path):
-        """Отрисовка итогового пути."""
+        """Отрисовывает результат на правом холсте с направлениями стрелок."""
         self.result_canvas.delete("all")
         pos = nx.get_node_attributes(self.graph, 'pos')
 
-        # Отрисовка рёбер итогового пути
-        for i in range(len(path) - 1):
+        # Рисуем рёбра пути с направлениями
+        for i in range(len(path)):
             x1, y1 = pos[path[i]]
-            x2, y2 = pos[path[i + 1]]
-            dx, dy = (x2 - x1), (y2 - y1)
+            x2, y2 = pos[path[(i + 1) % len(path)]]  # Замыкаем цикл
+
+            dx, dy = x2 - x1, y2 - y1
             length = (dx ** 2 + dy ** 2) ** 0.5
+            if length == 0:
+                continue
+
+            # Нормализуем вектор направления
             unit_dx, unit_dy = dx / length, dy / length
 
-            arrow_dx, arrow_dy = unit_dx * 15, unit_dy * 15
-            text_dx, text_dy = unit_dx * 20, unit_dy * 20
+            # Координаты для стрелки (отступаем от узлов)
+            arrow_start_x = x1 + unit_dx * 15
+            arrow_start_y = y1 + unit_dy * 15
+            arrow_end_x = x2 - unit_dx * 15
+            arrow_end_y = y2 - unit_dy * 15
 
+            # Рисуем линию со стрелкой
             self.result_canvas.create_line(
-                x1 + arrow_dx, y1 + arrow_dy, x2 - arrow_dx, y2 - arrow_dy,
+                arrow_start_x, arrow_start_y,
+                arrow_end_x, arrow_end_y,
                 fill="green", width=3, arrow=tk.LAST
             )
 
-            text_x = (x1 + x2) / 2 + text_dx
-            text_y = (y1 + y2) / 2 + text_dy
+            # Подпись веса ребра
+            text_x = (x1 + x2) / 2 + unit_dx * 20
+            text_y = (y1 + y2) / 2 + unit_dy * 20
 
+            # Смещаем текст для лучшей читаемости
             if abs(dx) > abs(dy):
                 text_y += 15 if dy > 0 else -15
             else:
                 text_x += 15 if dx > 0 else -15
 
+            weight = self.graph[path[i]][path[(i + 1) % len(path)]]['weight']
             self.result_canvas.create_text(
-                text_x, text_y, text=str(self.graph.get_edge_data(path[i], path[i + 1])['weight']),
+                text_x, text_y,
+                text=str(weight),
                 fill="red", font=("Helvetica", 10, "bold")
             )
 
-        # Замыкание цикла
-        x1, y1 = pos[path[-1]]
-        x2, y2 = pos[path[0]]
-        dx, dy = (x2 - x1), (y2 - y1)
-        length = (dx ** 2 + dy ** 2) ** 0.5
-        unit_dx, unit_dy = dx / length, dy / length
-
-        arrow_dx, arrow_dy = unit_dx * 15, unit_dy * 15
-        text_dx, text_dy = unit_dx * 20, unit_dy * 20
-
-        self.result_canvas.create_line(
-            x1 + arrow_dx, y1 + arrow_dy, x2 - arrow_dx, y2 - arrow_dy,
-            fill="green", width=3, arrow=tk.LAST
-        )
-
-        text_x = (x1 + x2) / 2 + text_dx
-        text_y = (y1 + y2) / 2 + text_dy
-
-        if abs(dx) > abs(dy):
-            text_y += 15 if dy > 0 else -15
-        else:
-            text_x += 15 if dx > 0 else -15
-
-        self.result_canvas.create_text(
-            text_x, text_y, text=str(self.graph.get_edge_data(path[-1], path[0])['weight']),
-            fill="red", font=("Helvetica", 10, "bold")
-        )
-
-        # Отрисовка вершин
+        # Рисуем вершины
         for node, (x, y) in pos.items():
             self.result_canvas.create_oval(x - 10, y - 10, x + 10, y + 10, fill="orange")
             self.result_canvas.create_text(x, y, text=str(node), fill="black")
+
 
     def clear_graph(self):
         self.graph.clear()
         self.nodes = []
         self.selected_node = None
-        self.history = []  # Очищаем историю
+        self.history = []
         self.canvas.delete("all")
         self.result_canvas.delete("all")
         self.output_label.config(text="Общая длина: ")
-        self.tree.delete(*self.tree.get_children())  # Очищаем таблицу
-
+        self.time_label.config(text="Время выполнения: ")
+        self.tree.delete(*self.tree.get_children())
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = GraphApp(root)
     root.mainloop()
-
-
